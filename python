@@ -1,0 +1,84 @@
+import hashlib
+import bcrypt
+import scrypt
+import base64
+
+# Get hash input from the user
+hash_input = input("Enter the hash: ").strip()
+wordlist_path = "/usr/share/wordlists/rockyou.txt"
+
+# Extract parts from Yescrypt/Scrypt hash format
+def extract_parts(yescrypt_hash):
+    parts = yescrypt_hash.split("$")
+    if len(parts) < 5:
+        return None, None
+    return parts[3], parts[4]
+
+# Identify the hash type
+def identify_hash(hash_str):
+    length = len(hash_str)
+
+    if hash_str.startswith("$2a$") or hash_str.startswith("$2b$") or hash_str.startswith("$2y$"):
+        return "bcrypt"
+    elif hash_str.startswith("$y$") or hash_str.startswith("$7$"):
+        return "yescrypt"
+    elif length == 32:
+        return "md5"
+    elif length == 40:
+        return "sha1"
+    elif length == 64:
+        return "sha256"
+    elif length == 128:
+        return "sha512"
+    else:
+        return "unknown"
+
+# Cracking function
+def crack_hash(hash_str, wordlist):
+    hash_type = identify_hash(hash_str)
+    print(f"[+] Detected Hash Type: {hash_type.upper()}")
+
+    if hash_type == "unknown":
+        print("[-] Unable to determine hash type.")
+        return
+
+    with open(wordlist, "r", encoding="latin-1") as file:
+        for password in file:
+            password = password.strip()
+
+            if hash_type in ["md5", "sha1", "sha256", "sha512"]:
+                # Compute hash based on type
+                hashed = getattr(hashlib, hash_type)(password.encode()).hexdigest()
+                if hashed == hash_str:
+                    print(f"[+] Password Found: {password}")
+                    return
+            
+            elif hash_type == "bcrypt":
+                try:
+                    if bcrypt.checkpw(password.encode(), hash_str.encode()):
+                        print(f"[+] Password Found: {password}")
+                        return
+                except ValueError:
+                    print("[-] Invalid bcrypt hash format.")
+                    return
+
+            elif hash_type == "yescrypt":
+                salt_b64, stored_hash = extract_parts(hash_str)
+                if not salt_b64:
+                    print("[-] Failed to extract salt.")
+                    return
+                
+                try:
+                    salt_decoded = base64.b64decode(salt_b64 + "===")  # Fix padding
+                    derived_key = scrypt.hash(password.encode(), salt_decoded, N=16384, r=8, p=1)
+                    if base64.b64encode(derived_key).decode() == stored_hash:
+                        print(f"[+] Password Found: {password}")
+                        return
+                except Exception as e:
+                    print(f"[-] Error processing yescrypt hash: {e}")
+                    return
+
+    print("[-] No password match found.")
+
+# Run the cracker
+crack_hash(hash_input, wordlist_path)
